@@ -1,0 +1,92 @@
+VERSION 0.8
+
+# +INIT sets up environment variables and cache mounts for Gleam builds
+# Arguments:
+#   - cache_prefix: Optional custom cache prefix for cache IDs
+#   - gleam_version: Version of Gleam to install
+INIT:
+    FUNCTION
+    ARG --required gleam_version
+    ARG gleam_platform="x86_64-unknown-linux-musl"
+    ARG cache_prefix
+
+    LET gleam_tag="v${gleam_version}"
+    LET gleam_archive="gleam-${gleam_tag}-${gleam_platform}.tar.gz"
+    LET gleam_url="https://github.com/gleam-lang/gleam/releases/download/${gleam_tag}/${gleam_archive}"
+
+    ENV GLEAM_VERSION=$gleam_version
+    ENV GLEAM_HOME="/tmp/earthly/.gleam"
+    ENV PATH="$GLEAM_HOME/bin:$PATH"
+
+    LET os_hash="$(md5sum /etc/os-release | cut -d ' ' -f 1)"
+    IF [ "$cache_prefix" = "" ]
+        LET cache_prefix="${EARTHLY_TARGET_PROJECT_NO_TAG}#${os_hash}#earthly-gleam-cache"
+    END
+    ENV EARTHLY_CACHE_PREFIX=$cache_prefix
+
+    ENV EARTHLY_GLEAM_HOME_CACHE="type=cache,id=$EARTHLY_CACHE_PREFIX#gleam-home,sharing=shared,target=$GLEAM_HOME"
+    ENV EARTHLY_GLEAM_BUILD_CACHE="type=cache,id=$EARTHLY_CACHE_PREFIX#build#$EARTHLY_TARGET_NAME,sharing=locked,target=build"
+
+    RUN --mount=$EARTHLY_GLEAM_HOME_CACHE \
+        if [ ! -f $GLEAM_HOME/bin/gleam ]; then \
+          echo "Installing Gleam from $gleam_url"; \
+          mkdir -p $GLEAM_HOME && \
+          curl -fsSL "$gleam_url" | tar -xz -C $GLEAM_HOME --strip-components=1 ; \
+        fi
+
+# +SET_CACHE_MOUNTS_ENV exports cache mount values
+SET_CACHE_MOUNTS_ENV:
+    FUNCTION
+    DO +CHECK_INITED
+    ENV EARTHLY_GLEAM_HOME_CACHE="type=cache,id=$EARTHLY_CACHE_PREFIX#gleam-home,sharing=shared,target=$GLEAM_HOME"
+    ENV EARTHLY_GLEAM_BUILD_CACHE="type=cache,id=$EARTHLY_CACHE_PREFIX#build#$EARTHLY_TARGET_NAME,sharing=locked,target=build"
+
+# +GLEAM runs a gleam command with cache mounts enabled
+# Arguments:
+#   - args: Gleam command arguments (e.g. build, test, format)
+GLEAM:
+    FUNCTION
+    DO +CHECK_INITED
+    ARG --required args
+
+    RUN --mount=$EARTHLY_GLEAM_HOME_CACHE --mount=$EARTHLY_GLEAM_BUILD_CACHE gleam $args
+
+# +COPY_OUTPUT copies built artifacts to local image layers
+# Arguments:
+#   - output: regex or path match (optional)
+COPY_OUTPUT:
+    FUNCTION
+    DO +CHECK_INITED
+    ARG output="./build"
+
+    RUN --mount=$EARTHLY_GLEAM_BUILD_CACHE cp -r $output /tmp/gleam-output
+    RUN cp -r /tmp/gleam-output/* build/
+
+# +CHECK_INITED ensures +INIT has been run
+CHECK_INITED:
+    FUNCTION
+    RUN if [ ! -n "$EARTHLY_CACHE_PREFIX" ]; then \
+          echo "+INIT has not been called yet in this build environment"; \
+          exit 1; \
+        fi
+
+# COPY_BEAMS copies compiled .beam files from the first found ebin dir under /build/build/
+# Arguments:
+#   - out_dir: target directory to receive the .beam files (e.g. /build/out/usr/lib/gemini)
+COPY_BEAMS:
+    FUNCTION
+    ARG --required out_dir
+
+    RUN echo '#!/bin/sh\n\
+set -e\n\
+OUT_DIR="$1"\n\
+EBIN_DIR=$(find /build/build -type d -path "*/ebin" | head -n 1)\n\
+if [ -z "$EBIN_DIR" ]; then\n\
+  echo "No .beam files found under /build/build"\n\
+  exit 1\n\
+fi\n\
+mkdir -p "$OUT_DIR"\n\
+find "$EBIN_DIR" -name "*.beam" -exec cp {} "$OUT_DIR/" \;' > /usr/local/bin/copy-beams.sh
+    RUN chmod +x /usr/local/bin/copy-beams.sh
+
+    RUN /usr/local/bin/copy-beams.sh $out_dir

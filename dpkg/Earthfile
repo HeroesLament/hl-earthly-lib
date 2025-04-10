@@ -1,0 +1,73 @@
+VERSION 0.8
+
+# +INIT sets up the dpkg environment and tools
+# Arguments:
+#   - filemap_path: Path to the filemap (e.g. packaging/filemap.deb)
+#   - deb_output: Name of the .deb file to produce (e.g. dist/myapp.deb)
+INIT:
+    FUNCTION
+    ARG --required filemap_path
+    ARG deb_output="dist/package.deb"
+
+    ENV EARTHLY_DPKG_FILEMAP=$filemap_path
+    ENV EARTHLY_DPKG_OUTPUT=$deb_output
+    ENV EARTHLY_DPKG_ROOT=/tmp/pkgroot
+
+    RUN apt-get update && apt-get install -y --no-install-recommends dpkg-dev coreutils
+
+# +SET_OUTPUT_PATHS creates parent dirs for output
+SET_OUTPUT_PATHS:
+    FUNCTION
+    RUN mkdir -p $(dirname $EARTHLY_DPKG_OUTPUT)
+
+# +STAGE_FROM_FILEMAP reads filemap and stages into /tmp/pkgroot
+STAGE_FROM_FILEMAP:
+    FUNCTION
+    DO +CHECK_INITED
+    COPY ${EARTHLY_DPKG_FILEMAP} filemap.deb
+    COPY . .
+
+    RUN mkdir -p $EARTHLY_DPKG_ROOT && \
+        grep -vE '^\s*$' filemap.deb | while IFS=":" read -r src dst; do \
+            [ -z "$src" ] && continue; \
+            dstpath="$EARTHLY_DPKG_ROOT$dst"; \
+            echo "Staging: $src -> $dstpath"; \
+            mkdir -p "$(dirname "$dstpath")"; \
+            cp "$src" "$dstpath"; \
+        done && \
+        if [ -d "$EARTHLY_DPKG_ROOT/DEBIAN" ]; then \
+            find "$EARTHLY_DPKG_ROOT/DEBIAN" -type f \( -name "preinst" -o -name "postinst" -o -name "prerm" -o -name "postrm" \) \
+                -exec chmod 755 {} \;; \
+        fi
+
+
+# +BUILD generates the .deb from staged directory
+BUILD:
+    FUNCTION
+    DO +CHECK_INITED
+    DO +SET_OUTPUT_PATHS
+    RUN dpkg-deb --build $EARTHLY_DPKG_ROOT $EARTHLY_DPKG_OUTPUT
+
+# +COPY_OUTPUT copies .deb into output layer
+COPY_OUTPUT:
+    FUNCTION
+    DO +CHECK_INITED
+    RUN mkdir -p /build-out
+    RUN cp $EARTHLY_DPKG_OUTPUT /build-out/
+    SAVE ARTIFACT /build-out/$(basename $EARTHLY_DPKG_OUTPUT) AS LOCAL local-output/
+
+# +CHECK_INITED ensures +INIT has run
+CHECK_INITED:
+    FUNCTION
+    RUN if [ ! -n "$EARTHLY_DPKG_FILEMAP" ]; then \
+          echo "+INIT has not been run"; \
+          exit 1; \
+        fi
+
+# +PACKAGE runs stage, build, and copy together
+PACKAGE:
+    FUNCTION
+    DO +CHECK_INITED
+    DO +STAGE_FROM_FILEMAP
+    DO +BUILD
+    DO +COPY_OUTPUT
