@@ -24,12 +24,29 @@ cp "$FROM"/ebin/*.app "$TO/"' > /usr/local/bin/g2r-copy.sh
     RUN chmod +x /usr/local/bin/g2r-copy.sh
     RUN /usr/local/bin/g2r-copy.sh $gleam_build_dir $rebar_app_dir
 
-# Copy gleam_erlang OTP app into Rebar3 build tree
+# COPY_GLEAM_ERLANG copies the compiled gleam_erlang OTP app into a Rebar3-compatible app path.
+# Arguments:
+#   - gleam_build_root: Path to the Gleam build root (e.g., build/dev/erlang)
+#   - rebar_app_dir: Rebar3 app ebin directory (e.g., apps/gleam_erlang/ebin)
 COPY_GLEAM_ERLANG:
     FUNCTION
-    ARG --required gleam_build_root="build/dev/erlang"
-    ARG --required rebar_app_dir="apps/gleam_erlang/ebin"
+    ARG --required gleam_build_root
+    ARG --required rebar_app_dir
 
-    RUN mkdir -p $rebar_app_dir
-    RUN cp -r $gleam_build_root/gleam_erlang/ebin/*.beam $rebar_app_dir/
-    RUN cp -r $gleam_build_root/gleam_erlang/ebin/*.app $rebar_app_dir/
+    RUN echo '#!/bin/sh
+set -e
+FROM="$1"
+TO="$2"
+
+if [ ! -d "$FROM/gleam_erlang/ebin" ]; then
+  echo "Missing $FROM/gleam_erlang/ebin — Gleam not built?" >&2
+  exit 1
+fi
+
+mkdir -p "$TO"
+cp "$FROM"/gleam_erlang/ebin/*.beam "$TO"/
+cp "$FROM"/gleam_erlang/ebin/*.app "$TO"/
+' > /usr/local/bin/g2r-copy-ge.sh
+
+    RUN chmod +x /usr/local/bin/g2r-copy-ge.sh
+    RUN /usr/local/bin/g2r-copy-ge.sh $gleam_build_root $rebar_app_dir
