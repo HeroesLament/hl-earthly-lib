@@ -38,14 +38,14 @@ set -e
 FROM="$1"
 TO="$2"
 
-if [ ! -d "$FROM/gleam_erlang/ebin" ]; then
-  echo "Missing $FROM/gleam_erlang/ebin — Gleam not built?" >&2
+if [ ! -d "$FROM/ebin" ]; then
+  echo "Missing $FROM/ebin — Gleam not built?" >&2
   exit 1
 fi
 
 mkdir -p "$TO"
-cp "$FROM"/gleam_erlang/ebin/*.beam "$TO"/
-cp "$FROM"/gleam_erlang/ebin/*.app "$TO"/
+cp "$FROM"/ebin/*.beam "$TO"/
+cp "$FROM"/ebin/*.app "$TO"/
 ' > /usr/local/bin/g2r-copy-ge.sh
 
     RUN chmod +x /usr/local/bin/g2r-copy-ge.sh
