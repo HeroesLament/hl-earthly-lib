@@ -1,0 +1,22 @@
+VERSION 0.8
+
+# +INIT sets up shared cache env vars for rebar3
+INIT:
+    FUNCTION
+    ARG cache_prefix
+
+    LET os_hash="$(md5sum /etc/os-release | cut -d ' ' -f 1)"
+    IF [ "$cache_prefix" = "" ]
+        LET cache_prefix="${EARTHLY_TARGET_PROJECT_NO_TAG}#${os_hash}#rebar3"
+    END
+
+    ENV EARTHLY_REBAR3_CACHE="type=cache,id=$cache_prefix#rebar3,sharing=shared,target=/root/.cache/rebar3"
+
+# +REBAR3 runs a rebar3 command with shared cache
+# Arguments:
+#   - args: rebar3 arguments string (e.g. "compile", "release", etc.)
+REBAR3:
+    FUNCTION
+    DO +INIT
+    ARG --required args
+    RUN --mount=$EARTHLY_REBAR3_CACHE rebar3 $args
