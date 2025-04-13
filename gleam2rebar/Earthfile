@@ -1,0 +1,25 @@
+VERSION 0.8
+
+# +COPY_TO_REBAR copies compiled Gleam .beam and .app files into a Rebar3-compatible app ebin dir.
+# Arguments:
+#   - gleam_build_dir: Path to the compiled Gleam build output (e.g., build/dev/erlang/myapp)
+#   - rebar_app_dir: Path to the target Rebar3 app ebin directory (e.g., apps/myapp/ebin)
+COPY_TO_REBAR:
+    FUNCTION
+    ARG --required gleam_build_dir
+    ARG --required rebar_app_dir
+
+    RUN echo '#!/bin/sh\n\
+set -e\n\
+FROM="$1"\n\
+TO="$2"\n\
+if [ ! -d "$FROM/ebin" ]; then\n\
+  echo "Missing $FROM/ebin — Gleam build not found" >&2\n\
+  exit 1\n\
+fi\n\
+mkdir -p "$TO"\n\
+cp "$FROM"/ebin/*.beam "$TO/"\n\
+cp "$FROM"/ebin/*.app "$TO/"' > /usr/local/bin/g2r-copy.sh
+
+    RUN chmod +x /usr/local/bin/g2r-copy.sh
+    RUN /usr/local/bin/g2r-copy.sh $gleam_build_dir $rebar_app_dir
